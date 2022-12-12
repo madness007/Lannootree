@@ -19,6 +19,6 @@ void check(T err, const char* const func, const char* const file, const int line
   }
 }
 
-void mean_of_mask_launcher(uchar3* d_input_image, u_int16_t* d_mask, uint3* d_total, uint* d_count, int i, size_t rows, size_t cols);
+void mean_of_mask_launcher(uchar3* d_input_image, u_int16_t* d_mask, uint3* d_total, uint* d_count, size_t rows, size_t cols);
 
 void divide_total_launcher(uint3* d_total, uint* d_count, uint3* d_cstrign, int size);

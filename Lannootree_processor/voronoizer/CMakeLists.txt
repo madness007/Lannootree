@@ -7,7 +7,7 @@ configure_file(${CMAKE_CURRENT_LIST_DIR}/src/voronoizer/include/version.hpp.in $
 set( CMAKE_CXX_STANDARD 17 )
 set(CMAKE_FIND_LIBRARY_SUFFIXES .a .lib)
 
-# set(USE_CUDA TRUE)
+set(USE_CUDA TRUE)
 
 if (USE_CUDA)
   add_compile_definitions(USE_CUDA)

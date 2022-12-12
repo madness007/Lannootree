@@ -23,4 +23,9 @@ while True:
 
   r.lpush('voronoi', cv2.imencode('.jpg', image)[1].tobytes())
   end = time.time()
+  # Lock at 25fps
+  sleep = 0.040 - (end - start)
+  if (sleep > 0):
+    time.sleep(sleep)
+  end = time.time()
   print(f"time: {(end - start) * 1000} ms")

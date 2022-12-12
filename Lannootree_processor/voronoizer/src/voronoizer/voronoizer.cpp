@@ -1,6 +1,7 @@
 #include <voroniozer.hpp>
 
 #include <chrono>
+#include <timer.hpp>
 
 namespace Processing {
 
@@ -113,11 +114,14 @@ namespace Processing {
     cv::Mat frame;
     cv::Mat screen(m_screen.rows, m_screen.cols, m_screen.type());
 
-    while (m_frame_provider->has_next_frame()) {
-      frame = m_frame_provider->next_frame();
+    #ifdef USE_CUDA
+    std::vector<uint3> cstring;
+    #endif
 
+    while (m_frame_provider->has_next_frame()) {
       auto start = std::chrono::high_resolution_clock::now();
 
+      frame = m_frame_provider->next_frame();
       if (frame.empty()) continue;
 
       bool screen_size_changed = scale_screen_to_image(screen, frame);
@@ -134,16 +138,6 @@ namespace Processing {
       std::vector<std::vector<cv::Point2f>> facets;
       subdiv.getVoronoiFacetList({}, facets, centers);
 
-      if (screen_size_changed) {
-        #ifdef USE_CUDA
-          alloc_new_image_size(frame, facets.size());
-        #endif
-      }
- 
-      // Convert to gray scale
-      cv::Mat gray_image;
-      cv::cvtColor(frame, gray_image, cv::COLOR_BGR2GRAY);
-
       #ifndef USE_CUDA
       std::vector<std::vector<cv::Vec3i>> colors(actual_workers);
       
@@ -159,7 +153,7 @@ namespace Processing {
         std::vector<cv::Vec3i>* color = &colors[i];
 
         m_thread_pool.queue_job(
-          [&facets, &gray_image, &frame, color, from, to] (void) {
+          [&facets, &frame, color, from, to] (void) {
 
             for (int i = from; i < to; i++) {
               auto ifacet = facets[i];
@@ -171,7 +165,7 @@ namespace Processing {
               );
 
               // Create mask
-              cv::Mat mask(gray_image.rows, gray_image.cols, gray_image.type(), cv::Scalar(0));
+              cv::Mat mask(frame.rows, frame.cols, CV_8UC1, cv::Scalar(0));
               cv::fillConvexPoly(mask, ifacets, cv::Scalar(255));
 
               // Filter points using mask
@@ -204,7 +198,7 @@ namespace Processing {
               color->push_back(
                 cv::Vec3i(iblue, igreen, ired)
               );
-              // cv::fillConvexPoly(frame, ifacets, cv::Scalar(ired, igreen, iblue), cv::LINE_AA, 0);
+              cv::fillConvexPoly(frame, ifacets, cv::Scalar(ired, igreen, iblue), cv::LINE_AA, 0);
             }
           }
         );
@@ -220,32 +214,36 @@ namespace Processing {
         }
       }
       #else
-        std::vector<uint3> cstring(facets.size());
-        cv::Mat mask(frame.rows, frame.cols, CV_16UC1, cv::Scalar(0));
+        if (screen_size_changed) {
+          cv::Mat mask(frame.rows, frame.cols, CV_16UC1, cv::Scalar(0));
 
+          for (size_t i = 0; i < facets.size(); i++) {
+            std::vector<cv::Point> ifacet;
+            for (auto point : facets[i]) ifacet.push_back(
+              cv::Point(point.x, point.y)
+            );
+
+            // 100 is just to visualize the mask
+            cv::fillConvexPoly(mask, ifacet, cv::Scalar(i));
+          }
+
+          alloc_new_image_size(frame, mask, facets.size());
+          
+          cstring.resize(facets.size());        
+        }
+
+        process_image(frame, cstring);
+
+        // This is just visualization
         for (size_t i = 0; i < facets.size(); i++) {
           std::vector<cv::Point> ifacet;
           for (auto point : facets[i]) ifacet.push_back(
             cv::Point(point.x, point.y)
           );
 
-          // 100 is just to visualize the mask
-          cv::fillConvexPoly(mask, ifacet, cv::Scalar(i));
+          cv::fillConvexPoly(frame, ifacet, cv::Scalar(cstring[i].x, cstring[i].y, cstring[i].z), cv::LINE_AA, 0);
         }
-
-        process_image(frame, mask, cstring);
-
-        // This is just visualization
-        // for (size_t i = 0; i < facets.size(); i++) {
-        //   std::vector<cv::Point> ifacet;
-        //   for (auto point : facets[i]) ifacet.push_back(
-        //     cv::Point(point.x, point.y)
-        //   );
-
-        //   cv::fillConvexPoly(frame, ifacet, cv::Scalar(cstring[i].x, cstring[i].y, cstring[i].z), cv::LINE_AA, 0);
-        // }
       #endif
-
 
       // Place values in right order
       cv::Mat argsort;
@@ -278,10 +276,9 @@ namespace Processing {
       m_fromatter->format(next, frame);
 
       auto end = std::chrono::high_resolution_clock::now();
-      auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-      frames_rendered++;
+      auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
 
-      std::cout << duration.count() << "ms  " << frames_rendered << std::endl;
+      std::cout << std::chrono::duration_cast<std::chrono::milliseconds>(duration).count() << "ms | " << duration.count() << "us" << std::endl;
     }
 
     m_thread_pool.stop();
